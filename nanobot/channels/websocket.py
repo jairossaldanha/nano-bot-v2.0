@@ -92,6 +92,7 @@ class WebSocketConfig(Base):
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    allow_remote_webui: bool = False  # Allow /webui/bootstrap from non-localhost (reverse proxy deployments)
 
     @field_validator("path")
     @classmethod
@@ -578,7 +579,7 @@ class WebSocketChannel(BaseChannel):
                 self._api_tokens.pop(token_key, None)
 
     def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if not _is_localhost(connection):
+        if not self.config.allow_remote_webui and not _is_localhost(connection):
             return _http_error(403, "webui bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
