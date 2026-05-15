@@ -2,6 +2,16 @@
 name: memory
 description: Two-layer memory system with Dream-managed knowledge files.
 always: true
+schema:
+  must_do:
+    - "Search history.jsonl before stating that information is unknown"
+    - "Reference MEMORY.md for persistent facts before answering from general knowledge"
+  must_not_do:
+    - "Never edit SOUL.md, USER.md, or MEMORY.md directly — managed by Dream"
+    - "Never assume information is absent without searching memory/history.jsonl"
+  quality_checks:
+    - "If answering about past events, was history.jsonl consulted?"
+    - "If stating user preferences, is it consistent with USER.md?"
 ---
 
 # Memory

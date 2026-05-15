@@ -240,3 +240,66 @@ class SkillsLoader:
         for key, value in parsed.items():
             metadata[str(key)] = value
         return metadata
+
+    # -- Structured skill schema & checklists --------------------------------
+
+    def get_skill_schema(self, name: str) -> dict:
+        """Return the ``schema`` block from a skill's frontmatter.
+
+        The schema may contain ``must_do``, ``must_not_do``,
+        ``required_output``, and ``quality_checks`` lists that define the
+        skill as a verifiable contract rather than a free-text suggestion.
+
+        Returns an empty dict if no schema is defined.
+        """
+        meta = self.get_skill_metadata(name) or {}
+        schema = meta.get("schema")
+        return schema if isinstance(schema, dict) else {}
+
+    def get_checklist_for_skills(self, skill_names: list[str]) -> str:
+        """Build a consolidated execution checklist from active skills.
+
+        For each skill that defines a ``schema`` in its frontmatter, this
+        produces a markdown checklist with ``must_do``, ``required_output``,
+        and ``quality_checks`` items.  Skills without a schema are silently
+        skipped.
+
+        Returns an empty string when no checklists apply — callers should
+        gate on truthiness before injecting into the system prompt.
+        """
+        sections: list[str] = []
+        for name in skill_names:
+            schema = self.get_skill_schema(name)
+            if not schema:
+                continue
+
+            must_do = schema.get("must_do", [])
+            must_not_do = schema.get("must_not_do", [])
+            required = schema.get("required_output", [])
+            checks = schema.get("quality_checks", [])
+
+            if not (must_do or must_not_do or required or checks):
+                continue
+
+            lines: list[str] = [f"### {name}"]
+            for item in must_do:
+                lines.append(f"- [ ] MUST: {item}")
+            for item in must_not_do:
+                lines.append(f"- [ ] AVOID: {item}")
+            for item in required:
+                lines.append(f"- [ ] OUTPUT: {item}")
+            for item in checks:
+                lines.append(f"- [ ] CHECK: {item}")
+            sections.append("\n".join(lines))
+
+        return "\n\n".join(sections)
+
+    def list_skills_with_descriptions(self) -> list[dict[str, str]]:
+        """Return a lightweight list of available skills for the classifier.
+
+        Each entry has ``name`` and ``description`` keys.
+        """
+        return [
+            {"name": entry["name"], "description": self._get_skill_description(entry["name"])}
+            for entry in self.list_skills(filter_unavailable=True)
+        ]

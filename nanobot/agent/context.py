@@ -31,6 +31,7 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
+        current_message_hint: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
@@ -43,6 +44,12 @@ class ContextBuilder:
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n{memory}")
 
+        # Procedural memory: inject relevant past playbooks
+        if current_message_hint:
+            procedural_ctx = self.memory.get_procedural_context(current_message_hint)
+            if procedural_ctx:
+                parts.append(f"# Procedural Memory\n\n{procedural_ctx}")
+
         always_skills = self.skills.get_always_skills()
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
@@ -52,6 +59,17 @@ class ContextBuilder:
         skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
+
+        # Execution checklist: zero-cost critic/reviewer pass
+        all_active_skills = list(always_skills)
+        checklist = self.skills.get_checklist_for_skills(all_active_skills)
+        if checklist:
+            parts.append(
+                "# Execution Checklist\n\n"
+                "Before finalizing your response, verify each item mentally:\n\n"
+                + checklist
+                + "\n\n> If any item is incomplete, address it before responding."
+            )
 
         entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
         if entries:
@@ -148,7 +166,9 @@ class ContextBuilder:
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
+            {"role": "system", "content": self.build_system_prompt(
+                skill_names, channel=channel, current_message_hint=current_message,
+            )},
             *history,
         ]
         if messages[-1].get("role") == current_role:

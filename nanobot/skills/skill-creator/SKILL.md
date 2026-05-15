@@ -1,6 +1,23 @@
 ---
 name: skill-creator
 description: Create or update AgentSkills. Use when designing, structuring, or packaging skills with scripts, references, and assets.
+schema:
+  must_do:
+    - "Follow the 6-step creation process in order"
+    - "Run init_skill.py to scaffold the skill directory"
+    - "Include YAML frontmatter with name and description"
+    - "Test any bundled scripts by actually executing them"
+  must_not_do:
+    - "Never create skills without proper frontmatter"
+    - "Never skip script testing before packaging"
+    - "Never create README.md or other auxiliary documentation files"
+  required_output:
+    - "SKILL.md with valid frontmatter"
+    - "Packaged .skill file via package_skill.py"
+  quality_checks:
+    - "Does the SKILL.md body stay under 500 lines?"
+    - "Does the description include when-to-use triggers?"
+    - "Were all bundled scripts tested successfully?"
 ---
 
 # Skill Creator

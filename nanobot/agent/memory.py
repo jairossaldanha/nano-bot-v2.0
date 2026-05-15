@@ -29,7 +29,10 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 class MemoryStore:
-    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
+    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md.
+
+    Also owns the procedural memory layer (``playbooks.jsonl``).
+    """
 
     _DEFAULT_MAX_HISTORY = 1000
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
@@ -53,6 +56,9 @@ class MemoryStore:
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
+        # Procedural memory: playbooks of successful complex tasks
+        from nanobot.agent.procedural import ProceduralMemory
+        self.procedural = ProceduralMemory(self.memory_dir)
         self._maybe_migrate_legacy_history()
 
     @property
@@ -382,6 +388,19 @@ class MemoryStore:
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
         )
+
+    # -- procedural memory facade -------------------------------------------
+
+    def get_procedural_context(
+        self, query: str, task_type: str | None = None,
+    ) -> str:
+        """Return formatted procedural context relevant to *query*.
+
+        Delegates to :class:`~nanobot.agent.procedural.ProceduralMemory`.
+        Returns an empty string when no playbooks match.
+        """
+        similar = self.procedural.search_similar(query, task_type=task_type)
+        return self.procedural.format_for_context(similar)
 
 
 
@@ -903,6 +922,9 @@ class Dream:
                 reason, new_cursor,
             )
 
+        # Phase 3: Attempt to promote complex tasks to playbooks
+        await self._maybe_promote_to_playbook(history_text, analysis)
+
         # Git auto-commit (only when there are actual changes)
         if changelog and self.store.git.is_initialized():
             ts = batch[-1]["timestamp"]
@@ -913,3 +935,72 @@ class Dream:
                 logger.info("Dream commit: {}", sha)
 
         return True
+
+    async def _maybe_promote_to_playbook(
+        self,
+        history_text: str,
+        analysis: str,
+    ) -> None:
+        """Extract a playbook from complex successful tasks found in *analysis*.
+
+        This is a lightweight LLM call that runs after Dream Phase 2.
+        If the analysis indicates a multi-step task was completed
+        successfully, we extract a structured playbook and persist it
+        to ``memory/playbooks.jsonl`` for future procedural recall.
+        """
+        # Quick heuristic gate: skip if analysis is trivially short or
+        # contains no success indicators.
+        if len(analysis) < 100:
+            return
+        success_indicators = [
+            "concluído", "finalizado", "implemented", "completed",
+            "done", "finished", "deployed", "created", "resolved",
+            "entregue", "pronto",
+        ]
+        if not any(ind in analysis.lower() for ind in success_indicators):
+            return
+
+        try:
+            response = await self.provider.chat_with_retry(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": render_template(
+                            "agent/dream_extract_playbook.md",
+                            strip=True,
+                            history=history_text[:3000],
+                            analysis=analysis[:2000],
+                        ),
+                    },
+                    {"role": "user", "content": "Extract playbook if applicable."},
+                ],
+                tools=None,
+                tool_choice=None,
+            )
+            content = (response.content or "").strip()
+            if not content or content == "null":
+                logger.debug("Dream playbook extraction: no playbook found")
+                return
+
+            import json as _json
+            # Strip markdown code fences if present
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            playbook = _json.loads(content)
+            if not isinstance(playbook, dict):
+                return
+
+            pb_id = self.store.procedural.save_playbook(
+                task_type=playbook.get("task_type", "general"),
+                summary=playbook.get("summary", ""),
+                steps=playbook.get("steps", []),
+                skills_used=playbook.get("skills_used", []),
+                tags=playbook.get("tags", []),
+            )
+            logger.info(
+                "Dream promoted playbook #{}: {}",
+                pb_id, playbook.get("summary", "")[:100],
+            )
+        except Exception:
+            logger.debug("Dream playbook extraction failed", exc_info=True)

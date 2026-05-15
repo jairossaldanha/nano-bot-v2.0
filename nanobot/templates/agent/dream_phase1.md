@@ -35,6 +35,12 @@ Skill discovery — flag [SKILL] when ALL of these are true:
 - It is substantial enough to warrant its own instruction set (not trivial like "read a file")
 - Do not worry about duplicates — the next phase will check against existing skills
 
+Procedural learning — additionally note:
+- [PATTERN-SUCCESS] if a multi-step task was completed successfully (what worked and why)
+- [PATTERN-ERROR] if the same type of error or omission recurred across sessions
+- [PATTERN-PREFERENCE] if the user corrected the same behavior more than once
+These patterns help improve execution consistency over time.
+
 Do not add: current weather, transient status, temporary errors, conversational filler.
 
 [SKIP] if nothing needs updating.
