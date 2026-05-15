@@ -1,27 +1,46 @@
-import { Puzzle, CheckCircle2, XCircle, ExternalLink } from "lucide-react";
-import { useState } from "react";
+import { Puzzle, CheckCircle2, XCircle, ExternalLink, Loader2 } from "lucide-react";
+import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useApiQuery } from "@/hooks/useApiQuery";
 
-interface Integration {
-  id: string;
+interface SkillItem {
   name: string;
-  type: "skill" | "mcp";
+  source: string;
   description: string;
-  enabled: boolean;
-  hasSchema: boolean;
+  available: boolean;
+  always: boolean;
 }
 
-const MOCK: Integration[] = [
-  { id: "memory", name: "memory", type: "skill", description: "Two-layer memory system with Dream-managed knowledge files.", enabled: true, hasSchema: true },
-  { id: "skill-creator", name: "skill-creator", type: "skill", description: "Create or update AgentSkills.", enabled: true, hasSchema: true },
-  { id: "web-search", name: "web_search", type: "skill", description: "Search the web and return summarized results.", enabled: true, hasSchema: false },
-  { id: "supabase", name: "supabase-mcp", type: "mcp", description: "Database management and queries via Supabase.", enabled: true, hasSchema: false },
-  { id: "github", name: "github-mcp", type: "mcp", description: "Repository management and code search.", enabled: false, hasSchema: false },
-];
+interface McpServerItem {
+  type: string;
+  command?: string;
+  url?: string;
+  enabled_tools: string[];
+}
+
+interface ConfigPayload {
+  mcp_servers: Record<string, McpServerItem>;
+}
+
+interface SkillsPayload {
+  skills: SkillItem[];
+}
 
 export function IntegrationsPage() {
-  const [items] = useState<Integration[]>(MOCK);
+  const { data: configData, loading: configLoading } = useApiQuery<ConfigPayload>("/api/config");
+  const { data: skillsData, loading: skillsLoading } = useApiQuery<SkillsPayload>("/api/skills");
+
+  const skills = useMemo(() => skillsData?.skills || [], [skillsData]);
+  const mcpServers = useMemo(() => {
+    if (!configData?.mcp_servers) return [];
+    return Object.entries(configData.mcp_servers).map(([name, srv]) => ({
+      name,
+      ...srv,
+    }));
+  }, [configData]);
+
+  const loading = configLoading || skillsLoading;
 
   return (
     <div className="flex h-full flex-col">
@@ -33,42 +52,63 @@ export function IntegrationsPage() {
       </div>
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-3xl space-y-3 px-6 py-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Skills</h3>
-          {items.filter(i => i.type === "skill").map(item => (
-            <div key={item.id} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{item.name}</span>
-                  {item.hasSchema && (
-                    <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">schema</span>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground/50" />
+            </div>
+          ) : (
+            <>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Skills</h3>
+              {skills.map(item => (
+                <div key={item.name} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{item.name}</span>
+                      {item.always && (
+                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-500">always active</span>
+                      )}
+                      <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{item.source}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
+                  </div>
+                  {item.available ? (
+                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+                  ) : (
+                    <XCircle className="h-5 w-5 shrink-0 text-destructive/60" />
                   )}
                 </div>
-                <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
-              </div>
-              {item.enabled ? (
-                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
-              ) : (
-                <XCircle className="h-5 w-5 shrink-0 text-muted-foreground/30" />
+              ))}
+              {skills.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  No skills found in workspace or builtin directory.
+                </div>
               )}
-            </div>
-          ))}
-          <h3 className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">MCP Servers</h3>
-          {items.filter(i => i.type === "mcp").map(item => (
-            <div key={item.id} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
-              <div className="flex-1">
-                <span className="text-sm font-medium">{item.name}</span>
-                <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
-              </div>
-              <Button variant="ghost" size="icon" className="h-7 w-7">
-                <ExternalLink className="h-3 w-3" />
-              </Button>
-              {item.enabled ? (
-                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
-              ) : (
-                <XCircle className="h-5 w-5 shrink-0 text-muted-foreground/30" />
+
+              <h3 className="mt-6 text-xs font-semibold uppercase tracking-wider text-muted-foreground">MCP Servers</h3>
+              {mcpServers.map(item => (
+                <div key={item.name} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{item.name}</span>
+                      <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{item.type}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs font-mono text-muted-foreground">
+                      {item.type === "stdio" ? item.command : item.url}
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                    <ExternalLink className="h-3 w-3" />
+                  </Button>
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+                </div>
+              ))}
+              {mcpServers.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                  No MCP servers configured.
+                </div>
               )}
-            </div>
-          ))}
+            </>
+          )}
         </div>
       </ScrollArea>
     </div>

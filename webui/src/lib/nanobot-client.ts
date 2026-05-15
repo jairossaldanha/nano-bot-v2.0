@@ -45,6 +45,8 @@ export interface NanobotClientOptions {
   socketFactory?: (url: string) => WebSocket;
   /** Delay-cap for reconnect backoff (ms). */
   maxBackoffMs?: number;
+  /** The chat ID to attempt to resume upon connection. */
+  resumeChatId?: string;
 }
 
 /**
@@ -94,8 +96,14 @@ export class NanobotClient {
   }
 
   /** Swap the URL (e.g. after fetching a fresh token) then reconnect. */
-  updateUrl(url: string): void {
-    this.currentUrl = url;
+  updateUrl(url: string, resumeChatId?: string): void {
+    if (resumeChatId) {
+      const urlObj = new URL(url);
+      urlObj.searchParams.set("resume_chat_id", resumeChatId);
+      this.currentUrl = urlObj.toString();
+    } else {
+      this.currentUrl = url;
+    }
   }
 
   onStatus(handler: StatusHandler): Unsubscribe {
@@ -290,7 +298,9 @@ export class NanobotClient {
       if (this.options.onReauth) {
         try {
           const refreshed = await this.options.onReauth();
-          if (refreshed) this.currentUrl = refreshed;
+          if (refreshed) {
+            this.updateUrl(refreshed);
+          }
         } catch {
           // fall through to retry with current URL
         }

@@ -11,7 +11,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 import { NanobotClient } from "@/lib/nanobot-client";
-import { ClientProvider } from "@/providers/ClientProvider";
+import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type { ChatSummary } from "@/lib/types";
 
 // Lazy-loaded pages
@@ -35,6 +35,7 @@ type BootState =
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const NAV_STORAGE_KEY = "nanobot-webui.nav-section";
+const ACTIVE_CHAT_KEY = "nanobot-webui.active-chat";
 const SIDEBAR_WIDTH = 279;
 
 function readSidebarOpen(): boolean {
@@ -66,14 +67,30 @@ export default function App() {
     (async () => {
       try {
         const boot = await fetchBootstrap();
-        if (cancelled) return;
-        const url = deriveWsUrl(boot.ws_path, boot.token);
+        let resumeChatId: string | undefined;
+        try {
+          const rawKey = window.localStorage.getItem(ACTIVE_CHAT_KEY);
+          if (rawKey && rawKey.startsWith("websocket:")) {
+            resumeChatId = rawKey.substring(10);
+          }
+        } catch { /* ignore */ }
+
+        const url = deriveWsUrl(boot.ws_path, boot.token, resumeChatId);
         const client = new NanobotClient({
           url,
+          resumeChatId,
           onReauth: async () => {
             try {
               const refreshed = await fetchBootstrap();
-              return deriveWsUrl(refreshed.ws_path, refreshed.token);
+              // Try to read current resume target directly from storage again
+              let currentResumeId: string | undefined;
+              try {
+                const currentRaw = window.localStorage.getItem(ACTIVE_CHAT_KEY);
+                if (currentRaw && currentRaw.startsWith("websocket:")) {
+                  currentResumeId = currentRaw.substring(10);
+                }
+              } catch { /* ignore */ }
+              return deriveWsUrl(refreshed.ws_path, refreshed.token, currentResumeId);
             } catch {
               return null;
             }
@@ -171,7 +188,15 @@ function Shell() {
   const { t, i18n } = useTranslation();
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
-  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const { client } = useClient();
+  const [activeKey, setActiveKey] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      return window.localStorage.getItem(ACTIVE_CHAT_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [activeSection, setActiveSection] = useState<NavSection>(readNavSection);
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState<boolean>(readSidebarOpen);
@@ -197,6 +222,21 @@ function Shell() {
       window.localStorage.setItem(NAV_STORAGE_KEY, activeSection);
     } catch { /* ignore */ }
   }, [activeSection]);
+
+  useEffect(() => {
+    if (activeKey) {
+      try {
+        window.localStorage.setItem(ACTIVE_CHAT_KEY, activeKey);
+      } catch { /* ignore */ }
+      if (activeKey.startsWith("websocket:")) {
+        client.updateUrl(client["currentUrl"], activeKey.substring(10));
+      }
+    } else {
+      try {
+        window.localStorage.removeItem(ACTIVE_CHAT_KEY);
+      } catch { /* ignore */ }
+    }
+  }, [activeKey, client]);
 
   useEffect(() => {
     if (activeKey) return;

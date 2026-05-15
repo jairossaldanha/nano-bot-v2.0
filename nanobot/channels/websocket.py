@@ -397,6 +397,19 @@ class WebSocketChannel(BaseChannel):
         # become self-expiring (callers just refresh the session list).
         self._media_secret: bytes = secrets.token_bytes(32)
 
+    def _session_exists(self, chat_id: str) -> bool:
+        """Check whether a persisted session file exists for ``websocket:<chat_id>``.
+
+        Used to validate ``resume_chat_id`` — we only resume sessions that
+        have been written to disk at least once (i.e. at least one message
+        was exchanged).
+        """
+        if self._session_manager is None:
+            return False
+        key = f"websocket:{chat_id}"
+        path = self._session_manager._get_session_path(key)
+        return path.exists()
+
     # -- Subscription bookkeeping -------------------------------------------
 
     def _attach(self, connection: Any, chat_id: str) -> None:
@@ -534,6 +547,12 @@ class WebSocketChannel(BaseChannel):
         m = re.match(r"^/api/media/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$", got)
         if m:
             return self._handle_media_fetch(m.group(1), m.group(2))
+
+        # 3b. Config & skills API for the embedded webui.
+        if got == "/api/config":
+            return self._handle_config_read(request)
+        if got == "/api/skills":
+            return self._handle_skills_list(request)
 
         # 4. WebSocket upgrade (the channel's primary purpose). Only run the
         # handshake gate on requests that actually ask to upgrade; otherwise
@@ -768,6 +787,105 @@ class WebSocketChannel(BaseChannel):
         deleted = self._session_manager.delete_session(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
 
+    # -- Config & skills API ------------------------------------------------
+
+    @staticmethod
+    def _mask_secret(value: str | None) -> str | None:
+        """Mask an API key for safe display: show first 6 + last 3 chars."""
+        if not value or not isinstance(value, str):
+            return None
+        if len(value) <= 12:
+            return value[:3] + "••••••"
+        return value[:6] + "••••••" + value[-3:]
+
+    def _handle_config_read(self, request: WsRequest) -> Response:
+        """Return sanitized configuration for the webui dashboard."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            from nanobot.config.loader import load_config
+
+            config = load_config()
+            # Build a safe representation — never leak raw secrets.
+            providers_safe: dict[str, dict[str, str | None]] = {}
+            provider_data = config.providers.model_dump(mode="json", by_alias=True)
+            for name, pcfg in provider_data.items():
+                if not isinstance(pcfg, dict):
+                    continue
+                providers_safe[name] = {
+                    "api_key": self._mask_secret(pcfg.get("apiKey") or pcfg.get("api_key")),
+                    "api_base": pcfg.get("apiBase") or pcfg.get("api_base"),
+                }
+
+            mcp_servers: dict[str, dict[str, object]] = {}
+            mcp_data = config.tools.mcp_servers
+            for name, srv in mcp_data.items():
+                mcp_servers[name] = {
+                    "type": srv.type,
+                    "command": srv.command or None,
+                    "url": srv.url or None,
+                    "enabled_tools": srv.enabled_tools,
+                }
+
+            payload = {
+                "agents": {
+                    "defaults": {
+                        "model": config.agents.defaults.model,
+                        "provider": config.agents.defaults.provider,
+                        "workspace": config.agents.defaults.workspace,
+                        "max_tokens": config.agents.defaults.max_tokens,
+                        "temperature": config.agents.defaults.temperature,
+                        "timezone": config.agents.defaults.timezone,
+                        "unified_session": config.agents.defaults.unified_session,
+                        "disabled_skills": config.agents.defaults.disabled_skills,
+                    },
+                },
+                "providers": providers_safe,
+                "mcp_servers": mcp_servers,
+                "channels": {
+                    "send_progress": config.channels.send_progress,
+                    "send_tool_hints": config.channels.send_tool_hints,
+                },
+            }
+            return _http_json_response(payload)
+        except Exception as e:
+            logger.warning("webui: config read failed: {}", e)
+            return _http_error(500, "failed to read config")
+
+    def _handle_skills_list(self, request: WsRequest) -> Response:
+        """Return the list of available skills with metadata."""
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        try:
+            from nanobot.agent.skills import SkillsLoader
+            from nanobot.config.loader import load_config
+
+            config = load_config()
+            workspace = config.workspace_path
+            disabled = set(config.agents.defaults.disabled_skills or [])
+            loader = SkillsLoader(workspace, disabled_skills=disabled)
+
+            skills_raw = loader.list_skills(filter_unavailable=False)
+            skills_out: list[dict[str, object]] = []
+            for entry in skills_raw:
+                name = entry["name"]
+                meta = loader.get_skill_metadata(name) or {}
+                available = loader._check_requirements(loader._get_skill_meta(name))
+                skills_out.append({
+                    "name": name,
+                    "source": entry.get("source", "unknown"),
+                    "description": meta.get("description", name),
+                    "available": available,
+                    "always": bool(
+                        loader._parse_nanobot_metadata(meta.get("metadata")).get("always")
+                        or meta.get("always")
+                    ),
+                })
+            return _http_json_response({"skills": skills_out})
+        except Exception as e:
+            logger.warning("webui: skills list failed: {}", e)
+            return _http_error(500, "failed to list skills")
+
     def _serve_static(self, request_path: str) -> Response | None:
         """Resolve *request_path* against the built SPA directory; SPA fallback to index.html."""
         assert self._static_dist_path is not None
@@ -893,7 +1011,14 @@ class WebSocketChannel(BaseChannel):
             logger.warning("websocket: client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
-        default_chat_id = str(uuid.uuid4())
+        # Allow clients to resume an existing chat session instead of always
+        # generating a fresh UUID.  The webui sends this on reconnect so the
+        # conversation context is preserved across page reloads / sleep.
+        resume_id = _query_first(query, "resume_chat_id")
+        if resume_id and _is_valid_chat_id(resume_id) and self._session_exists(resume_id):
+            default_chat_id = resume_id
+        else:
+            default_chat_id = str(uuid.uuid4())
 
         try:
             await connection.send(
