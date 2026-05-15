@@ -28,6 +28,16 @@
       "ariaLabel": "Change language"
     }
   },
+  "nav": {
+    "chat": "Chat",
+    "subagents": "Subagents",
+    "playbooks": "Playbooks",
+    "files": "Files",
+    "cron": "Cron Jobs",
+    "company": "Company",
+    "integrations": "Integrations",
+    "settings": "Settings"
+  },
   "chat": {
     "fallbackTitle": "Chat {{id}}",
     "loading": "Loading…",

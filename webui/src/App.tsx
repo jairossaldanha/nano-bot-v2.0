@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { Sidebar } from "@/components/Sidebar";
+import { NavSidebar, type NavSection } from "@/components/NavSidebar";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { preloadMarkdownText } from "@/components/MarkdownText";
@@ -12,6 +13,15 @@ import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 import { NanobotClient } from "@/lib/nanobot-client";
 import { ClientProvider } from "@/providers/ClientProvider";
 import type { ChatSummary } from "@/lib/types";
+
+// Lazy-loaded pages
+import { PlaybooksPage } from "@/components/pages/PlaybooksPage";
+import { FilesPage } from "@/components/pages/FilesPage";
+import { SubagentsPage } from "@/components/pages/SubagentsPage";
+import { CompanyPage } from "@/components/pages/CompanyPage";
+import { CronPage } from "@/components/pages/CronPage";
+import { IntegrationsPage } from "@/components/pages/IntegrationsPage";
+import { SettingsPage } from "@/components/pages/SettingsPage";
 
 type BootState =
   | { status: "loading" }
@@ -24,6 +34,7 @@ type BootState =
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
+const NAV_STORAGE_KEY = "nanobot-webui.nav-section";
 const SIDEBAR_WIDTH = 279;
 
 function readSidebarOpen(): boolean {
@@ -34,6 +45,15 @@ function readSidebarOpen(): boolean {
     return raw === "1";
   } catch {
     return true;
+  }
+}
+
+function readNavSection(): NavSection {
+  if (typeof window === "undefined") return "chat";
+  try {
+    return (window.localStorage.getItem(NAV_STORAGE_KEY) as NavSection) || "chat";
+  } catch {
+    return "chat";
   }
 }
 
@@ -152,6 +172,7 @@ function Shell() {
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<NavSection>(readNavSection);
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -161,16 +182,21 @@ function Shell() {
   } | null>(null);
   const lastSessionsLen = useRef(0);
 
+  // Persist sidebar and nav state
   useEffect(() => {
     try {
       window.localStorage.setItem(
         SIDEBAR_STORAGE_KEY,
         desktopSidebarOpen ? "1" : "0",
       );
-    } catch {
-      // ignore storage errors (private mode, etc.)
-    }
+    } catch { /* ignore */ }
   }, [desktopSidebarOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(NAV_STORAGE_KEY, activeSection);
+    } catch { /* ignore */ }
+  }, [activeSection]);
 
   useEffect(() => {
     if (activeKey) return;
@@ -216,13 +242,10 @@ function Shell() {
     }
   }, [createChat]);
 
-  const onSelectChat = useCallback(
-    (key: string) => {
-      setActiveKey(key);
-      setMobileSidebarOpen(false);
-    },
-    [],
-  );
+  const onSelectChat = useCallback((key: string) => {
+    setActiveKey(key);
+    setMobileSidebarOpen(false);
+  }, []);
 
   const onConfirmDelete = useCallback(async () => {
     if (!pendingDelete) return;
@@ -242,6 +265,10 @@ function Shell() {
     }
   }, [pendingDelete, deleteChat, activeKey, sessions]);
 
+  const onNavigate = useCallback((section: NavSection) => {
+    setActiveSection(section);
+  }, []);
+
   const headerTitle = activeSession
     ? activeSession.preview ||
       t("chat.fallbackTitle", { id: activeSession.chatId.slice(0, 6) })
@@ -259,58 +286,82 @@ function Shell() {
     loading,
     theme,
     onToggleTheme: toggle,
-    onNewChat: () => {
-      void onNewChat();
-    },
+    onNewChat: () => { void onNewChat(); },
     onSelect: onSelectChat,
     onRefresh: () => void refresh(),
     onRequestDelete: (key: string, label: string) =>
       setPendingDelete({ key, label }),
   };
 
+  // Show chat sidebar only when in chat section
+  const showChatSidebar = activeSection === "chat";
+
   return (
     <div className="relative flex h-full w-full overflow-hidden">
-      {/* Desktop sidebar: in normal flow, so the thread area width stays honest. */}
-      <aside
-        className={cn(
-          "relative z-20 hidden shrink-0 overflow-hidden lg:block",
-          "transition-[width] duration-300 ease-out",
-        )}
-        style={{ width: desktopSidebarOpen ? SIDEBAR_WIDTH : 0 }}
-      >
-        <div
+      {/* Icon navigation rail */}
+      <NavSidebar
+        activeSection={activeSection}
+        onNavigate={onNavigate}
+        theme={theme}
+        onToggleTheme={toggle}
+        onCollapse={() => setDesktopSidebarOpen((v) => !v)}
+      />
+
+      {/* Chat sidebar (only visible in chat section) */}
+      {showChatSidebar && (
+        <aside
           className={cn(
-            "absolute inset-y-0 left-0 h-full w-[279px] overflow-hidden bg-sidebar shadow-inner-right",
-            "transition-transform duration-300 ease-out",
-            desktopSidebarOpen ? "translate-x-0" : "-translate-x-full",
+            "relative z-20 hidden shrink-0 overflow-hidden lg:block",
+            "transition-[width] duration-300 ease-out",
           )}
+          style={{ width: desktopSidebarOpen ? SIDEBAR_WIDTH : 0 }}
         >
-          <Sidebar {...sidebarProps} onCollapse={closeDesktopSidebar} />
-        </div>
-      </aside>
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 h-full w-[279px] overflow-hidden bg-sidebar shadow-inner-right",
+              "transition-transform duration-300 ease-out",
+              desktopSidebarOpen ? "translate-x-0" : "-translate-x-full",
+            )}
+          >
+            <Sidebar {...sidebarProps} onCollapse={closeDesktopSidebar} />
+          </div>
+        </aside>
+      )}
 
-      <Sheet
-        open={mobileSidebarOpen}
-        onOpenChange={(open) => setMobileSidebarOpen(open)}
-      >
-        <SheetContent
-          side="left"
-          showCloseButton={false}
-          className="w-[279px] p-0 sm:max-w-[279px] lg:hidden"
+      {showChatSidebar && (
+        <Sheet
+          open={mobileSidebarOpen}
+          onOpenChange={(open) => setMobileSidebarOpen(open)}
         >
-          <Sidebar {...sidebarProps} onCollapse={closeMobileSidebar} />
-        </SheetContent>
-      </Sheet>
+          <SheetContent
+            side="left"
+            showCloseButton={false}
+            className="w-[279px] p-0 sm:max-w-[279px] lg:hidden"
+          >
+            <Sidebar {...sidebarProps} onCollapse={closeMobileSidebar} />
+          </SheetContent>
+        </Sheet>
+      )}
 
+      {/* Main content area */}
       <main className="flex h-full min-w-0 flex-1 flex-col">
-        <ThreadShell
-          session={activeSession}
-          title={headerTitle}
-          onToggleSidebar={toggleSidebar}
-          onGoHome={() => setActiveKey(null)}
-          onNewChat={onNewChat}
-          hideSidebarToggleOnDesktop={desktopSidebarOpen}
-        />
+        {activeSection === "chat" && (
+          <ThreadShell
+            session={activeSession}
+            title={headerTitle}
+            onToggleSidebar={toggleSidebar}
+            onGoHome={() => setActiveKey(null)}
+            onNewChat={onNewChat}
+            hideSidebarToggleOnDesktop={desktopSidebarOpen}
+          />
+        )}
+        {activeSection === "subagents" && <SubagentsPage />}
+        {activeSection === "playbooks" && <PlaybooksPage />}
+        {activeSection === "files" && <FilesPage />}
+        {activeSection === "cron" && <CronPage />}
+        {activeSection === "company" && <CompanyPage />}
+        {activeSection === "integrations" && <IntegrationsPage />}
+        {activeSection === "settings" && <SettingsPage />}
       </main>
 
       <DeleteConfirm
