@@ -4,6 +4,8 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
+    - ~/.config/nanobot:/home/nanobot/.config/nanobot
+    - ~/.cache/nanobot:/home/nanobot/.cache/nanobot
   cap_drop:
     - ALL
   cap_add:
@@ -18,16 +20,33 @@ services:
     <<: *common-config
     command: ["gateway"]
     restart: unless-stopped
-    ports:
-      - 18790:18790
+    # Ports not exposed publicly — access via Cloudflare Tunnel only
+    expose:
+      - 18790
+      - 8765
+    networks:
+      - default
+      - gateway
     deploy:
       resources:
         limits:
           cpus: "1"
-          memory: 1G
+          memory: 3G
         reservations:
           cpus: "0.25"
-          memory: 256M
+          memory: 512M
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: nanobot-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - gateway
+    depends_on:
+      - nanobot-gateway
 
   nanobot-api:
     container_name: nanobot-api
@@ -37,14 +56,16 @@ services:
     restart: unless-stopped
     ports:
       - 127.0.0.1:8900:8900
+    networks:
+      - default
     deploy:
       resources:
         limits:
           cpus: "1"
-          memory: 1G
+          memory: 3G
         reservations:
           cpus: "0.25"
-          memory: 256M
+          memory: 512M
 
   nanobot-cli:
     <<: *common-config
@@ -53,3 +74,10 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+    networks:
+      - default
+
+networks:
+  default:
+  gateway:
+    external: true

@@ -19,8 +19,8 @@ describe("localized format helpers", () => {
     await setAppLanguage("en");
     const english = relativeTime(value);
 
-    await setAppLanguage("zh-CN");
-    const chinese = relativeTime(value);
+    await setAppLanguage("pt");
+    const portuguese = relativeTime(value);
 
     expect(english).toBe(
       new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(
@@ -28,13 +28,13 @@ describe("localized format helpers", () => {
         "minute",
       ),
     );
-    expect(chinese).toBe(
-      new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" }).format(
+    expect(portuguese).toBe(
+      new Intl.RelativeTimeFormat("pt", { numeric: "auto" }).format(
         -1,
         "minute",
       ),
     );
-    expect(english).not.toBe(chinese);
+    expect(english).not.toBe(portuguese);
   });
 
   it("formats date-time using the active locale", async () => {
@@ -44,8 +44,8 @@ describe("localized format helpers", () => {
     await setAppLanguage("en");
     const english = fmtDateTime(value);
 
-    await setAppLanguage("fr");
-    const french = fmtDateTime(value);
+    await setAppLanguage("pt");
+    const portuguese = fmtDateTime(value);
 
     expect(english).toBe(
       new Intl.DateTimeFormat("en", {
@@ -53,12 +53,12 @@ describe("localized format helpers", () => {
         timeStyle: "short",
       }).format(date),
     );
-    expect(french).toBe(
-      new Intl.DateTimeFormat("fr", {
+    expect(portuguese).toBe(
+      new Intl.DateTimeFormat("pt", {
         dateStyle: "medium",
         timeStyle: "short",
       }).format(date),
     );
-    expect(english).not.toBe(french);
+    expect(english).not.toBe(portuguese);
   });
 });

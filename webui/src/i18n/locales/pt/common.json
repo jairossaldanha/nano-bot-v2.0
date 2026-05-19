@@ -1,0 +1,122 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Conectando ao nanobot…",
+      "boot": "Carregando nanobot…"
+    },
+    "error": {
+      "title": "Não foi possível alcançar o nanobot",
+      "gatewayHint": "Certifique-se de que o gateway está em execução (`nanobot gateway`) e que esta página está aberta na mesma máquina."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot web UI — converse com seu workspace nanobot."
+    }
+  },
+  "sidebar": {
+    "collapse": "Recolher barra lateral",
+    "toggleTheme": "Alternar tema",
+    "newChat": "Nova conversa",
+    "recent": "Recentes",
+    "refreshSessions": "Atualizar sessões",
+    "language": {
+      "label": "Idioma",
+      "ariaLabel": "Alterar idioma"
+    }
+  },
+  "nav": {
+    "chat": "Chat",
+    "subagents": "Subagentes",
+    "playbooks": "Playbooks",
+    "files": "Arquivos",
+    "cron": "Tarefas Agendadas",
+    "company": "Empresa",
+    "integrations": "Integrações",
+    "settings": "Configurações"
+  },
+  "chat": {
+    "fallbackTitle": "Chat {{id}}",
+    "loading": "Carregando…",
+    "noSessions": "Nenhuma sessão ainda.",
+    "actions": "Ações do chat para {{title}}",
+    "delete": "Excluir",
+    "newChat": "Nova conversa"
+  },
+  "deleteConfirm": {
+    "title": "Excluir \"{{title}}\"?",
+    "description": "O arquivo de sessão será removido do disco. Essa ação não pode ser desfeita.",
+    "cancel": "Cancelar",
+    "confirm": "Excluir"
+  },
+  "connection": {
+    "idle": "Ocioso",
+    "connecting": "Conectando…",
+    "open": "Conectado",
+    "reconnecting": "Reconectando…",
+    "closed": "Desconectado",
+    "error": "Erro de conexão"
+  },
+  "thread": {
+    "loadingConversation": "Carregando conversa…",
+    "empty": {
+      "description": "Faça perguntas, continue um trabalho local ou inicie uma nova conversa."
+    },
+    "header": {
+      "toggleSidebar": "Alternar barra lateral"
+    },
+    "composer": {
+      "placeholderThread": "Digite sua mensagem…",
+      "placeholderHero": "O que está pensando?",
+      "placeholderOpening": "Abrindo uma nova conversa…",
+      "inputAria": "Campo de mensagem",
+      "sendHint": "Enter para enviar · Shift+Enter para nova linha",
+      "send": "Enviar mensagem",
+      "attachImage": "Anexar imagem",
+      "encoding": "Codificando…",
+      "remove": "Remover anexo",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipo de arquivo não suportado",
+        "too_many_images": "Máximo de {{max}} imagens por mensagem",
+        "magic_mismatch": "O arquivo não parece ser uma imagem válida",
+        "decode_failed": "Não foi possível decodificar esta imagem",
+        "too_large": "Imagem muito grande — tente uma menor",
+        "io": "Não foi possível ler este arquivo"
+      }
+    },
+    "scrollToBottom": "Rolar para o fim"
+  },
+  "message": {
+    "streaming": "transmitindo",
+    "assistantTyping": "Assistente está digitando",
+    "toolSingle": "Usando uma ferramenta",
+    "toolMany": "Usou {{count}} ferramentas",
+    "imageAttachment": "Imagem anexada"
+  },
+  "lightbox": {
+    "title": "Pré-visualização da imagem",
+    "open": "Ver imagem",
+    "prev": "Imagem anterior",
+    "next": "Próxima imagem",
+    "close": "Fechar pré-visualização"
+  },
+  "code": {
+    "fallbackLanguage": "código",
+    "copyAria": "Copiar código",
+    "copy": "Copiar",
+    "copied": "Copiado"
+  },
+  "common": {
+    "dismiss": "Dispensar"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Mensagem muito grande",
+      "body": "O servidor rejeitou sua última mensagem porque ela excedeu o limite de tamanho. Remova algumas imagens ou tente arquivos menores e envie novamente."
+    }
+  }
+}

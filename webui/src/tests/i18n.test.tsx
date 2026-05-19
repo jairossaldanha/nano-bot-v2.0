@@ -22,13 +22,13 @@ describe("webui i18n", () => {
     expect(document.documentElement.lang).toBe("en");
 
     await user.click(screen.getByRole("button", { name: "Change language" }));
-    await user.click(screen.getByRole("menuitemradio", { name: /简体中文/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: /Português/i }));
 
     await waitFor(() => {
-      expect(document.documentElement.lang).toBe("zh-CN");
+      expect(document.documentElement.lang).toBe("pt");
     });
-    expect(localStorage.getItem("nanobot.locale")).toBe("zh-CN");
-    expect(screen.getByPlaceholderText("输入消息…")).toBeInTheDocument();
+    expect(localStorage.getItem("nanobot.locale")).toBe("pt");
+    expect(screen.getByPlaceholderText("Digite sua mensagem…")).toBeInTheDocument();
   });
 
   it("updates the composer aria label when the language changes", async () => {
@@ -36,9 +36,9 @@ describe("webui i18n", () => {
 
     await act(async () => {
       const { setAppLanguage } = await import("@/i18n");
-      await setAppLanguage("ja");
+      await setAppLanguage("pt");
     });
 
-    expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
+    expect(screen.getByLabelText("Campo de mensagem")).toBeInTheDocument();
   });
 });
