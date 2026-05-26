@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
@@ -39,6 +40,18 @@ class SubagentStatus:
     usage: dict = field(default_factory=dict)          # token usage
     stop_reason: str | None = None
     error: str | None = None
+
+
+@dataclass(slots=True)
+class SubagentTemplate:
+    """A template/persona for a subagent."""
+
+    name: str
+    description: str = ""
+    skills: list[str] | None = None
+    model: str | None = None
+    max_iterations: int | None = None
+    system_prompt_override: str | None = None
 
 
 class _SubagentHook(AgentHook):
@@ -95,18 +108,58 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self.subagents_dir = self.workspace / "subagents"
+
+    def list_templates(self) -> list[SubagentTemplate]:
+        """List available subagent templates from workspace/subagents/*.yaml."""
+        templates = []
+        if not self.subagents_dir.exists():
+            return templates
+
+        for path in self.subagents_dir.glob("*.yaml"):
+            try:
+                content = path.read_text(encoding="utf-8")
+                data = yaml.safe_load(content)
+                if isinstance(data, dict):
+                    templates.append(SubagentTemplate(
+                        name=data.get("name", path.stem),
+                        description=data.get("description", ""),
+                        skills=data.get("skills"),
+                        model=data.get("model"),
+                        max_iterations=data.get("max_iterations"),
+                        system_prompt_override=data.get("system_prompt_override"),
+                    ))
+            except Exception as e:
+                logger.warning("Failed to load subagent template {}: {}", path.name, e)
+        return templates
+
+    def get_template(self, name: str) -> SubagentTemplate | None:
+        """Get a specific subagent template by name."""
+        for t in self.list_templates():
+            if t.name == name:
+                return t
+        return None
 
     async def spawn(
         self,
         task: str,
         label: str | None = None,
+        template: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
+        tpl: SubagentTemplate | None = None
+        if template:
+            tpl = self.get_template(template)
+            if not tpl:
+                raise ValueError(f"Subagent template '{template}' not found in workspace/subagents/")
+
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+        if tpl:
+            display_label = f"[{tpl.name}] {display_label}"
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
 
         status = SubagentStatus(
@@ -118,7 +171,7 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status)
+            self._run_subagent(task_id, task, display_label, origin, status, tpl)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -144,6 +197,7 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         status: SubagentStatus,
+        template: SubagentTemplate | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -175,7 +229,16 @@ class SubagentManager:
             if self.web_config.enable:
                 tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
                 tools.register(WebFetchTool(proxy=self.web_config.proxy))
-            system_prompt = self._build_subagent_prompt()
+            system_prompt = self._build_subagent_prompt(template)
+            
+            run_model = self.model
+            run_max_iterations = 15
+            if template:
+                if template.model:
+                    run_model = template.model
+                if template.max_iterations:
+                    run_max_iterations = template.max_iterations
+
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -184,8 +247,8 @@ class SubagentManager:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
-                model=self.model,
-                max_iterations=15,
+                model=run_model,
+                max_iterations=run_max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=_SubagentHook(task_id, status),
                 max_iterations_message="Task completed but no final response was generated.",
@@ -282,22 +345,42 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self) -> str:
+    def _build_subagent_prompt(self, template: SubagentTemplate | None = None) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
-        skills_summary = SkillsLoader(
-            self.workspace,
-            disabled_skills=self.disabled_skills,
-        ).build_skills_summary()
-        return render_template(
+        
+        # Determine disabled skills
+        # If template specifies skills, disable everything else (except `always` skills).
+        # We do this by listing all skills and adding to disabled_skills if not in template.skills.
+        effective_disabled = set(self.disabled_skills)
+        loader = SkillsLoader(self.workspace, disabled_skills=effective_disabled)
+        
+        if template and template.skills is not None:
+            all_skills = loader.list_skills(filter_unavailable=False)
+            always_skills = loader.get_always_skills()
+            allowed = set(template.skills).union(set(always_skills))
+            for s in all_skills:
+                if s["name"] not in allowed:
+                    effective_disabled.add(s["name"])
+        
+        # Reload with effective disabled skills
+        loader = SkillsLoader(self.workspace, disabled_skills=effective_disabled)
+        skills_summary = loader.build_skills_summary()
+        
+        base_prompt = render_template(
             "agent/subagent_system.md",
             time_ctx=time_ctx,
             workspace=str(self.workspace),
             skills_summary=skills_summary or "",
         )
+        
+        if template and template.system_prompt_override:
+            base_prompt += f"\n\n## Role/Persona Context\n{template.system_prompt_override}\n"
+            
+        return base_prompt
 
     async def cancel_by_session(self, session_key: str) -> int:
         """Cancel all subagents for the given session. Returns count cancelled."""

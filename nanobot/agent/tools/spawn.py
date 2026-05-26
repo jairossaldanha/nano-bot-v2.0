@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        template=StringSchema("Optional template name to use for the subagent (e.g. 'researcher', 'coder')"),
         required=["task"],
     )
 )

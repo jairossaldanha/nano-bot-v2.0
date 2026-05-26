@@ -15,6 +15,7 @@ from loguru import logger
 
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.classifier import classify_task
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
@@ -420,6 +421,8 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
+        is_planning: bool = False,
+        planning_approved: bool = False,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -508,9 +511,16 @@ class AgentLoop:
 
             return items
 
+        tools_to_use = self.tools
+        if is_planning and not planning_approved:
+            tools_to_use = ToolRegistry()
+            for name in self.tools.tool_names:
+                if name not in ("exec", "spawn", "cron") and not name.startswith("mcp_"):
+                    tools_to_use.register(self.tools.get(name))
+
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
-            tools=self.tools,
+            tools=tools_to_use,
             model=self.model,
             max_iterations=self.max_iterations,
             max_tool_result_chars=self.max_tool_result_chars,
@@ -789,6 +799,14 @@ class AgentLoop:
             history = session.get_history(max_messages=0)
             current_role = "assistant" if is_subagent else "user"
 
+            # Check planning state from session metadata for system message
+            is_planning = False
+            planning_slug = session.metadata.get("planning_slug")
+            planning_task = session.metadata.get("planning_task")
+            planning_approved = session.metadata.get("planning_approved", False)
+            if planning_slug:
+                is_planning = True
+
             # Subagent content is already in `history` above; passing it again
             # as current_message would double-project it into the prompt.
             messages = self.context.build_messages(
@@ -798,13 +816,25 @@ class AgentLoop:
                 chat_id=chat_id,
                 session_summary=pending,
                 current_role=current_role,
+                is_planning=is_planning,
+                planning_slug=planning_slug,
+                planning_task=planning_task,
+                planning_approved=planning_approved,
             )
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 pending_queue=pending_queue,
+                is_planning=is_planning,
+                planning_approved=planning_approved,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
+            if session.metadata.get("planning_approved"):
+                session.metadata.pop("planning_slug", None)
+                session.metadata.pop("planning_approved", None)
+                session.metadata.pop("planning_task", None)
+                session.metadata.pop("planning_original_key", None)
+                logger.info("Planning state cleared for completed session {}", key)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -838,6 +868,52 @@ class AgentLoop:
         if result := await self.commands.dispatch(ctx):
             return result
 
+        # Check planning state
+        import re
+
+        def is_approval(text: str) -> bool:
+            lower = text.lower().strip()
+            if any(neg in lower for neg in ("não", "no ", "not", "cancel", "espera", "dont", "don't")):
+                return False
+            return any(word in lower for word in (
+                "aprovado", "aprovar", "approve", "approved", "prosseguir", "go ahead",
+                "pode executar", "pode rodar", "run the plan", "rodar o plano",
+                "confirmar", "confirmado", "confirmo", "pode ir", "lets go", "let's go"
+            ))
+
+        is_planning = False
+        planning_slug = session.metadata.get("planning_slug")
+        planning_task = session.metadata.get("planning_task")
+        planning_approved = session.metadata.get("planning_approved", False)
+
+        if planning_slug:
+            is_planning = True
+            # Check if this message is an approval
+            if not planning_approved and is_approval(raw):
+                session.metadata["planning_approved"] = True
+                planning_approved = True
+                self.sessions.save(session)
+                logger.info("Planning approved for session {}: {}", key, planning_slug)
+        else:
+            # Check if we should trigger planning mode
+            skills_list = self.context.skills.list_skills_with_descriptions()
+            classification = classify_task(raw, available_skills=skills_list)
+            if classification.complexity == "high":
+                # Trigger planning
+                slug = re.sub(r'[^a-z0-9\-]+', '-', raw[:40].lower()).strip('-')
+                if not slug:
+                    slug = "task"
+                session.metadata["planning_slug"] = slug
+                session.metadata["planning_approved"] = False
+                session.metadata["planning_task"] = raw
+                session.metadata["planning_original_key"] = session.key
+                self.sessions.save(session)
+                is_planning = True
+                planning_slug = slug
+                planning_task = raw
+                planning_approved = False
+                logger.info("Planning mode triggered for session {}: {} (slug: {})", key, raw[:50], slug)
+
         await self.consolidator.maybe_consolidate_by_tokens(
             session,
             session_summary=pending,
@@ -857,6 +933,10 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            is_planning=is_planning,
+            planning_slug=planning_slug,
+            planning_task=planning_task,
+            planning_approved=planning_approved,
         )
 
         async def _bus_progress(
@@ -917,6 +997,8 @@ class AgentLoop:
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
+            is_planning=is_planning,
+            planning_approved=planning_approved,
         )
 
         if final_content is None or not final_content.strip():
@@ -925,6 +1007,14 @@ class AgentLoop:
         # Skip the already-persisted user message when saving the turn
         save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
         self._save_turn(session, all_msgs, save_skip)
+        
+        # Clear planning state if it was approved and execution has finished successfully
+        if session.metadata.get("planning_approved"):
+            session.metadata.pop("planning_slug", None)
+            session.metadata.pop("planning_approved", None)
+            session.metadata.pop("planning_task", None)
+            session.metadata.pop("planning_original_key", None)
+            logger.info("Planning state cleared for completed session {}", key)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)

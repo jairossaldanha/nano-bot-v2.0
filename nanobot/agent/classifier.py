@@ -48,6 +48,7 @@ _TYPE_KEYWORDS: dict[str, list[str]] = {
         "código", "code", "script", "função", "function", "debug",
         "fix", "implement", "implementar", "refatorar", "refactor",
         "programa", "programar", "deploy", "build", "compilar",
+        "skill", "skills", "workflow", "workflows",
     ],
 }
 
@@ -57,7 +58,12 @@ _COMPLEXITY_HIGH_KEYWORDS: list[str] = [
     "plano completo", "full plan", "análise completa", "full analysis",
     "todas as", "all the", "passo a passo", "step by step",
     "do início ao fim", "end to end",
+    "crie uma skill", "criar skill", "create a skill", "create skill",
+    "crie um workflow", "criar workflow", "create a workflow", "create workflow",
+    "refatorar", "refactor", "complexa", "complexo", "complex",
+    "planejamento", "planejar", "planning", "plan"
 ]
+
 
 
 def classify_task(

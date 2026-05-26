@@ -32,9 +32,33 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         channel: str | None = None,
         current_message_hint: str | None = None,
+        is_planning: bool = False,
+        planning_slug: str | None = None,
+        planning_task: str | None = None,
+        planning_approved: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
+
+        if is_planning and planning_slug:
+            if not planning_approved:
+                parts.append(
+                    "# PLANNING MODE ACTIVE\n"
+                    f"You are in PLANNING MODE for the following task: \"{planning_task}\".\n"
+                    "You MUST NOT execute any code, compile, run scripts, spawn subagents, or edit files other than the plan file itself.\n\n"
+                    "Your goals in this mode are:\n"
+                    f"1. Create or update the plan file: `docs/PLAN-{planning_slug}.md` in the workspace.\n"
+                    "2. The plan file MUST include a detailed step-by-step breakdown of tasks, success criteria, and a verification plan (Phase X).\n"
+                    "3. If there is any ambiguity, ask the user Socratic questions in your message response to clarify design options, trade-offs, and details.\n"
+                    "4. Ask the user for their explicit feedback or approval.\n\n"
+                    "Once the user approves the plan, the planning phase will end and execution will begin."
+                )
+            else:
+                parts.append(
+                    "# APPROVED PLAN\n"
+                    f"An approved plan is available at `docs/PLAN-{planning_slug}.md`.\n"
+                    "You are executing this plan. Follow it step-by-step and update the plan file in the workspace by marking tasks `[ ]` as `[x]` as you complete them."
+                )
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -154,6 +178,10 @@ class ContextBuilder:
         chat_id: str | None = None,
         current_role: str = "user",
         session_summary: str | None = None,
+        is_planning: bool = False,
+        planning_slug: str | None = None,
+        planning_task: str | None = None,
+        planning_approved: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary)
@@ -168,6 +196,8 @@ class ContextBuilder:
         messages = [
             {"role": "system", "content": self.build_system_prompt(
                 skill_names, channel=channel, current_message_hint=current_message,
+                is_planning=is_planning, planning_slug=planning_slug,
+                planning_task=planning_task, planning_approved=planning_approved,
             )},
             *history,
         ]
