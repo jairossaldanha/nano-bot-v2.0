@@ -34,6 +34,8 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
+from nanobot.command.builtin import register_custom_management_commands
+from nanobot.command.custom import CustomCommandStore
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -281,6 +283,9 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        self.custom_commands = CustomCommandStore(workspace)
+        self.custom_commands.register_all(self.commands)
+        register_custom_management_commands(self.commands)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

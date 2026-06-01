@@ -5,12 +5,16 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+
+if TYPE_CHECKING:
+    from nanobot.command.custom import CustomCommandStore
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -308,15 +312,16 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
+    store: CustomCommandStore | None = getattr(ctx.loop, "custom_commands", None)
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content=build_help_text(),
+        content=build_help_text(store),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
-def build_help_text() -> str:
+def build_help_text(store: CustomCommandStore | None = None) -> str:
     """Build canonical help text shared across channels."""
     lines = [
         "🐈 nanobot commands:",
@@ -328,7 +333,21 @@ def build_help_text() -> str:
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
         "/help — Show available commands",
+        "",
+        "🔧 Custom command management:",
+        '/cmd-add <name> <prompt> — Create a command (e.g. /cmd-add clima tell me the weather)',
+        "/cmd-edit <name> <new prompt> — Edit a command's prompt",
+        "/cmd-remove <name> — Remove a command",
+        "/cmd-list — List all custom commands",
     ]
+    if store:
+        custom = store.list_all()
+        if custom:
+            lines.append("")
+            lines.append("⚡ Your custom commands:")
+            for name, cmd in sorted(custom.items()):
+                desc = cmd.description or cmd.prompt[:60]
+                lines.append(f"/{name} — {desc}")
     return "\n".join(lines)
 
 
@@ -345,3 +364,124 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/help", cmd_help)
+
+
+# ---------------------------------------------------------------------------
+# Custom command management handlers
+# ---------------------------------------------------------------------------
+
+async def cmd_cmd_add(ctx: CommandContext) -> OutboundMessage:
+    """Create a new custom command: /cmd-add <name> <prompt>."""
+    store: CustomCommandStore | None = getattr(ctx.loop, "custom_commands", None)
+    if store is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Custom commands are not available.",
+        )
+    args = ctx.args.strip()
+    if not args or " " not in args:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Usage: `/cmd-add <name> <prompt>`\nExample: `/cmd-add clima tell me today's weather`",
+        )
+    name, prompt = args.split(" ", 1)
+    name = name.lstrip("/").lower()
+    # Auto-generate a short description from the prompt
+    description = prompt[:80].rstrip(".") if len(prompt) > 80 else prompt
+    error = store.add(name, prompt, description)
+    if error:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=f"❌ {error}",
+        )
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=f'✅ Command `/{name}` created: "{prompt}"',
+    )
+
+
+async def cmd_cmd_edit(ctx: CommandContext) -> OutboundMessage:
+    """Edit an existing custom command: /cmd-edit <name> <new prompt>."""
+    store: CustomCommandStore | None = getattr(ctx.loop, "custom_commands", None)
+    if store is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Custom commands are not available.",
+        )
+    args = ctx.args.strip()
+    if not args or " " not in args:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Usage: `/cmd-edit <name> <new prompt>`",
+        )
+    name, prompt = args.split(" ", 1)
+    name = name.lstrip("/").lower()
+    error = store.edit(name, prompt)
+    if error:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=f"❌ {error}",
+        )
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=f'✅ Command `/{name}` updated: "{prompt}"',
+    )
+
+
+async def cmd_cmd_remove(ctx: CommandContext) -> OutboundMessage:
+    """Remove a custom command: /cmd-remove <name>."""
+    store: CustomCommandStore | None = getattr(ctx.loop, "custom_commands", None)
+    if store is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Custom commands are not available.",
+        )
+    name = ctx.args.strip().lstrip("/").lower()
+    if not name:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Usage: `/cmd-remove <name>`",
+        )
+    error = store.remove(name)
+    if error:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content=f"❌ {error}",
+        )
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=f"✅ Command `/{name}` removed.",
+    )
+
+
+async def cmd_cmd_list(ctx: CommandContext) -> OutboundMessage:
+    """List all custom commands."""
+    store: CustomCommandStore | None = getattr(ctx.loop, "custom_commands", None)
+    if store is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="Custom commands are not available.",
+        )
+    custom = store.list_all()
+    if not custom:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="No custom commands configured.\nUse `/cmd-add <name> <prompt>` to create one.",
+        )
+    lines = ["📋 Custom commands:", ""]
+    for name, cmd in sorted(custom.items()):
+        lines.append(f"**/{name}** — {cmd.description or '(no description)'}")
+        lines.append(f"  Prompt: _{cmd.prompt}_")
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content="\n".join(lines),
+    )
+
+
+def register_custom_management_commands(router: CommandRouter) -> None:
+    """Register the /cmd-* management commands."""
+    router.prefix("/cmd-add ", cmd_cmd_add)
+    router.prefix("/cmd-edit ", cmd_cmd_edit)
+    router.exact("/cmd-remove", cmd_cmd_remove)
+    router.prefix("/cmd-remove ", cmd_cmd_remove)
+    router.exact("/cmd-list", cmd_cmd_list)
