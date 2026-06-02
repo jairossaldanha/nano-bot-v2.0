@@ -117,12 +117,10 @@ class Nanobot:
         return RunResult(content=content, tools_used=[], messages=[])
 
 
-def _make_provider(config: Any) -> Any:
-    """Create the LLM provider from config (extracted from CLI)."""
+def _instantiate_provider(config: Any, model: str) -> Any:
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
@@ -177,4 +175,18 @@ def _make_provider(config: Any) -> Any:
         max_tokens=defaults.max_tokens,
         reasoning_effort=defaults.reasoning_effort,
     )
+    return provider
+
+
+def _make_provider(config: Any) -> Any:
+    """Create the LLM provider from config (extracted from CLI)."""
+    model = config.agents.defaults.model
+    provider = _instantiate_provider(config, model)
+
+    fallback_model = config.agents.defaults.fallback_model
+    if fallback_model:
+        fallback_provider = _instantiate_provider(config, fallback_model)
+        from nanobot.providers.fallback_provider import FallbackProvider
+        provider = FallbackProvider(provider, fallback_provider, fallback_model)
+
     return provider

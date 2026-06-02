@@ -15,6 +15,7 @@ __all__ = [
     "OpenAICodexProvider",
     "GitHubCopilotProvider",
     "AzureOpenAIProvider",
+    "FallbackProvider",
 ]
 
 _LAZY_IMPORTS = {
@@ -23,6 +24,7 @@ _LAZY_IMPORTS = {
     "OpenAICodexProvider": ".openai_codex_provider",
     "GitHubCopilotProvider": ".github_copilot_provider",
     "AzureOpenAIProvider": ".azure_openai_provider",
+    "FallbackProvider": ".fallback_provider",
 }
 
 if TYPE_CHECKING:
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
     from nanobot.providers.openai_compat_provider import OpenAICompatProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.fallback_provider import FallbackProvider
 
 
 def __getattr__(name: str):
