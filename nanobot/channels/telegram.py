@@ -343,19 +343,14 @@ class TelegramChannel(BaseChannel):
 
         # Add command handlers (using Regex to support @username suffixes before bot initialization)
         self._app.add_handler(MessageHandler(filters.Regex(r"^/start(?:@\w+)?$"), self._on_start))
-        self._app.add_handler(
-            MessageHandler(
-                filters.Regex(r"^/(new|stop|restart|status|dream)(?:@\w+)?(?:\s+.*)?$"),
-                self._forward_command,
-            )
-        )
-        self._app.add_handler(
-            MessageHandler(
-                filters.Regex(r"^/(dream-log|dream_log|dream-restore|dream_restore)(?:@\w+)?(?:\s+.*)?$"),
-                self._forward_command,
-            )
-        )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
+        # Forward any other command starting with / to the agent loop CommandRouter
+        self._app.add_handler(
+            MessageHandler(
+                filters.Regex(r"^/([a-zA-Z0-9_-]+)(?:@\w+)?(?:\s+.*)?$"),
+                self._forward_command,
+            )
+        )
 
         # Add message handler for text, photos, voice, documents, and locations
         self._app.add_handler(
