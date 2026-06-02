@@ -344,6 +344,21 @@ class OpenAICompatProvider(LLMProvider):
         name = model_name.lower()
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
+    def _clean_model_name(self, model_name: str) -> str:
+        spec = self._spec
+        if spec:
+            possible_prefixes = [f"{spec.name}/", f"{spec.name.replace('_', '-')}/"]
+            for kw in spec.keywords:
+                possible_prefixes.append(f"{kw}/")
+                possible_prefixes.append(f"{kw.replace('_', '-')}/")
+            for prefix in possible_prefixes:
+                if model_name.lower().startswith(prefix.lower()):
+                    model_name = model_name[len(prefix):]
+                    break
+            if spec.strip_model_prefix:
+                model_name = model_name.split("/")[-1]
+        return model_name
+
     def _build_kwargs(
         self,
         messages: list[dict[str, Any]],
@@ -362,8 +377,7 @@ class OpenAICompatProvider(LLMProvider):
             if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
                 messages, tools = self._apply_cache_control(messages, tools)
 
-        if spec and spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._clean_model_name(model_name)
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -527,9 +541,7 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Build a Responses API body for direct OpenAI requests."""
-        model_name = model or self.default_model
-        if self._spec and self._spec.strip_model_prefix:
-            model_name = model_name.split("/")[-1]
+        model_name = self._clean_model_name(model or self.default_model)
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         instructions, input_items = convert_messages(sanitized_messages)
 

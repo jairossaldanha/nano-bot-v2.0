@@ -186,6 +186,32 @@ async def test_openrouter_keeps_model_name_intact() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openrouter_strips_openrouter_prefix() -> None:
+    """OpenRouter gateway strips the 'openrouter/' prefix from model name if present."""
+    mock_create = AsyncMock(return_value=_fake_chat_response())
+    spec = find_by_name("openrouter")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_create
+
+        provider = OpenAICompatProvider(
+            api_key="sk-or-test-key",
+            api_base="https://openrouter.ai/api/v1",
+            default_model="openrouter/inclusionai/ring-2.6-1t",
+            spec=spec,
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="openrouter/inclusionai/ring-2.6-1t",
+        )
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["model"] == "inclusionai/ring-2.6-1t"
+
+
+
+@pytest.mark.asyncio
 async def test_aihubmix_strips_model_prefix() -> None:
     """AiHubMix strips the provider prefix (strip_model_prefix=True)."""
     mock_create = AsyncMock(return_value=_fake_chat_response())
